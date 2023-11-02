@@ -18,23 +18,30 @@ module.exports = {
         .setDescription("Turn on shuffle for playlist playback")
         .setRequired(false)
     ),
-  async execute({ client, interaction }) {
-    const url = interaction.options.getString("url");
-    const shuffle = interaction.options.getBoolean("shuffle") || false;
-    const voiceChannel = interaction.member.voice.channel;
+    async execute({ client, interaction }) {
+      const url = interaction.options.getString("url");
+      const shuffle = interaction.options.getBoolean("shuffle") || false;
+      const voiceChannel = interaction.member.voice.channel;
+  
+      if (!voiceChannel) {
+        return interaction.reply("ボイスチャンネルに入ってから呼んでね");
+      }
+      await interaction.deferReply({ ephemeral: true }).catch(console.error);
 
-    if (!voiceChannel) {
-      return interaction.reply("ボイスチャンネルに入ってから呼んでね");
-    }
-
-    const controller = controllerManager.getController(interaction.guild.id);
-    await interaction.deferReply({ ephemeral: true });
-
-    try {
-      if (play.yt_validate(url) === "playlist") {
-        await controller.handlePlaylist(url, interaction, voiceChannel, shuffle);
-        await interaction.editReply("プレイリストをキューに追加しました！");
-      } else {
+      await interaction.editReply("応答を開始します...").catch(console.error);
+      const controller = controllerManager.getController(interaction.guild.id);
+  
+      // ここで応答を保留することができます
+  
+      try {
+        if (play.yt_validate(url) === "playlist") {
+          await controller.handlePlaylist(url, interaction, voiceChannel, shuffle)
+            .then(() => interaction.editReply("プレイリストをキューに追加しました！"))
+            .catch((error) => {
+              console.error(error);
+              interaction.editReply("プレイリストの処理中にエラーが発生しました。");
+            });
+        } else {
         const videoInfo = await play.video_info(url).catch(error => {
           console.error(error);
           interaction.editReply("動画情報の取得に失敗しました。URLが正しいか確認してください。");
@@ -57,9 +64,10 @@ module.exports = {
           interaction.editReply(`キューに追加しました: [**${songDetails.title}**](${songDetails.url})`);
         }
       }
+      await interaction.editReply("プレイリストをキューに追加しました！").catch(console.error);
     } catch (error) {
       console.error(error);
-      interaction.editReply("エラーが発生しました。");
+      await interaction.followUp({ content: "エラーが発生しました。", ephemeral: true }).catch(console.error);
     }
   },
 };

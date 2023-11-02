@@ -16,8 +16,9 @@ class MusicQueue {
 
   add(song) {
     this.queue.push(song);
+    console.log(`曲が追加されました: ${song.title}, キューの長さ: ${this.queue.length}`);
   }
-
+  
   next() {
     return this.queue.shift();
   }
@@ -32,33 +33,48 @@ class MusicController {
   }
 
   async handlePlaylist(url, interaction, voiceChannel, shuffle) {
-    const playlistInfo = await play.playlist_info(url);
-    let songs = await Promise.all(
-      playlistInfo.videos.map(async (video) => {
-        const videoInfo = await play.video_info(video.url);
-        return {
-          title: videoInfo.video_details.title,
-          url: videoInfo.video_details.url,
-          duration: videoInfo.video_details.durationInSec,
-          thumbnail:
-            videoInfo.video_details.thumbnails[0]?.url ||
-            "デフォルトのサムネイルURL",
-        };
-      })
-    );
-
+    console.log("プレイリスト情報の取得を開始...");
+    const playlist = await play.playlist_info(url, { incomplete: true }).catch(console.error);
+    if (!playlist) {
+      console.log("プレイリスト情報が取得できませんでした。");
+      return;
+    }
+  
+    let songs = [];
+    let videoArray = playlist.videos; // すでに取得されたビデオの配列を使用
+  
+    for (const video of videoArray) {
+      let videoInfo = await play.video_info(video.url).catch(console.error);
+      if (!videoInfo) continue; // video_infoが取得できない場合はスキップ
+      songs.push({
+        title: videoInfo.video_details.title,
+        url: videoInfo.video_details.url,
+        duration: videoInfo.video_details.durationInSec,
+        thumbnail:
+          videoInfo.video_details.thumbnails[0]?.url ||
+          "デフォルトのサムネイルURL",
+      });
+    }
+  
+    // シャッフルオプションが有効な場合はシャッフルを適用
     if (shuffle) {
       songs = this.shuffleArray(songs);
     }
-
+  
+    // キューに曲を追加
     for (const song of songs) {
       this.queue.add(song);
+      console.log(`キューに追加された後のサイズ: ${this.queue.queue.length}`);
     }
+    console.log(`追加される曲の数: ${songs.length}`);
 
+  
+    // 再生を開始
     if (!this.queue.playing) {
       await this.playSong(interaction.guild, voiceChannel);
     }
   }
+  
 
   shuffleArray(array) {
     for (let i = array.length - 1; i > 0; i--) {
@@ -70,7 +86,6 @@ class MusicController {
 
   // 再生するメソッド playSong を追加
   async playSong(guild, voiceChannel) {
-    // guild と voiceChannel を保存
     this.currentGuild = guild;
     this.currentVoiceChannel = voiceChannel;
 
@@ -91,6 +106,7 @@ class MusicController {
     }
 
     try {
+      console.log(`Streaming URL: ${song.url}`);
       const stream = await play.stream(song.url);
       const resource = createAudioResource(stream.stream, {
         inputType: stream.type,
@@ -98,12 +114,12 @@ class MusicController {
       const player = createAudioPlayer();
       this.audioPlayer = player;
 
+      player.on('error', error => {
+        console.error(`Error occurred in the audio player: ${error.message}`);
+        this.playNext().catch(console.error);
+      });
+
       connection.subscribe(player);
-      const subscription = connection.subscribe(player);
-      if (!subscription) {
-        console.error("Failed to subscribe to the voice connection");
-        return;
-      }
       player.play(resource);
       this.queue.playing = true;
 
@@ -113,9 +129,7 @@ class MusicController {
 
       player.on(AudioPlayerStatus.Idle, () => {
         this.queue.playing = false;
-        this.playNext().catch((error) => {
-          console.error(error);
-        });
+        this.playNext().catch(console.error);
       });
     } catch (error) {
       console.error(error);
@@ -127,42 +141,35 @@ class MusicController {
       console.log("ボイスチャンネルに接続していません");
       return false;
     }
-
+  
     const connection = getVoiceConnection(this.currentGuild.id);
     if (!connection) {
       console.log("ボイスチャンネルに接続していません");
       return false;
     }
-
+  
     const dispatcher = connection.state.subscription?.player;
     if (!dispatcher) {
       console.log("再生中のトラックはありません");
       return false;
     }
-
-    if (this.queue.queue.length > 0) {
-      this.queue.next();
-      this.playNext();
-      console.log("次の曲に進みました");
-    } else {
-      this.queue.queue = [];
-      dispatcher.stop();
-      connection.destroy();
-      this.queue.playing = false;
-      console.log("再生を停止しました");
-    }
+  
+    dispatcher.stop(); // 現在の曲を停止する
+  
     return true;
   }
+  
 
   async playNext() {
-    const nextSong = this.queue.next();
-    if (nextSong) {
+    if (this.queue.queue.length > 0) {
       await this.playSong(this.currentGuild, this.currentVoiceChannel);
     } else {
       this.queue.playing = false;
       console.log("キューが空です。再生を停止しました");
+      this.closeConnectionAfterTimeout(this.currentGuild.id, 30 * 1000);
     }
   }
+
 
   closeConnectionAfterTimeout(guildId, timeout) {
     setTimeout(() => {
