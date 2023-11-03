@@ -1,11 +1,10 @@
-const { Client, Collection, Events, GatewayIntentBits } = require("discord.js");
+const { Client, Collection, Events, GatewayIntentBits, AttachmentBuilder } = require("discord.js");
 const dotenv = require("dotenv");
 dotenv.config();
 const axios = require("axios");
 const AdmZip = require("adm-zip");
 const fs = require("fs");
 const path = require('path');
-require("./registar.js");
 
 const client = new Client({
   intents: [
